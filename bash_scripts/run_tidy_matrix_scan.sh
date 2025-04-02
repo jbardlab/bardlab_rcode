@@ -9,8 +9,13 @@ TARGET_FOLDER="/Users/jbard/Library/CloudStorage/OneDrive-TexasA&MUniversity/rep
 echo "Processing CSV files in $TARGET_FOLDER..."
 for csv_file in "$TARGET_FOLDER"/*.CSV "$TARGET_FOLDER"/*.csv; do
     if [ -f "$csv_file" ]; then
-        echo "Processing: $csv_file"
-        pixi run --manifest-path "${PIXI_TOML_LOCATION}" python "${SCRIPT_PATH}" "$csv_file"
+        # Skip files ending with _tidy.csv (case insensitive check)
+        if [[ "${csv_file,,}" != *"_tidy.csv" ]]; then
+            echo "Processing: $csv_file"
+            pixi run --manifest-path "${PIXI_TOML_LOCATION}" python "${SCRIPT_PATH}" "$csv_file"
+        else
+            echo "Skipping: $csv_file (already tidied)"
+        fi
     fi
 done
 
