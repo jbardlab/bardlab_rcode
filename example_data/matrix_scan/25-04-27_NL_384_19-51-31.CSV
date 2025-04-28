@@ -1,0 +1,131 @@
+User: USER,Path: C:\Program Files (x86)\BMG\CLARIOstar\User\Data,Test run no.: 336
+Test name: NL_384,Date: 4/27/2025,Time: 7:51:31 PM
+
+Luminescence
+
+Raw Data (470-80)
+
+,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,
+A,,,,,,,,,,,,,,,,,,,,,,,,
+B,,502,,1212,,1845,,1083,,8595,,7651,,10084,,3074,,5178,,66759,,,,
+C,,6126,,2048,,419,,825,,11851,,7166,,11189,,2958,,13913,,108040,,,,
+D,,2286,,978,,714,,887,,10223,,6732,,9080,,2165,,5422,,74036,,,,
+E,,,,,,,,,,,,,,,,,,,,,,,,
+F,,18260,,16999,,2713,,24710,,292343,,,,,,,,,,,,,,
+G,,9785,,14567,,10533,,24817,,352583,,,,,,,,,,,,,,
+H,,12396,,13936,,4278,,28448,,305739,,,,,,,,,,,,,,
+I,,,,,,,,,,,,,,,,,,,,,,,,
+J,,,,,,,,,,,,,,,,,,,,,,,,
+K,,,,,,,,,,,,,,,,,,,,,,,,
+L,,,,,,,,,,,,,,,,,,,,,,,,
+M,,9413,,2098,,2281,,17849,,190914,,5957,,10171,,11265,,13875,,58791,,47,,
+N,,72905,,16247,,2753,,12315,,145662,,1975,,8880,,2749,,5489,,62567,,53,,
+O,,7851,,16391,,2582,,11779,,169541,,16412,,6456,,10761,,5456,,64061,,44,,
+P,,,,,,,,,,,,,,,,,,,,,,,,
+
+ 
+Well,Content,Raw Data (470-80),
+B02,Sample X1,502,
+B04,Sample X4,1212,
+B06,Sample X7,1845,
+B08,Sample X10,1083,
+B10,Sample X13,8595,
+B12,Sample X16,7651,
+B14,Sample X19,10084,
+B16,Sample X22,3074,
+B18,Sample X25,5178,
+B20,Sample X28,66759,
+C02,Sample X2,6126,
+C04,Sample X5,2048,
+C06,Sample X8,419,
+C08,Sample X11,825,
+C10,Sample X14,11851,
+C12,Sample X17,7166,
+C14,Sample X20,11189,
+C16,Sample X23,2958,
+C18,Sample X26,13913,
+C20,Sample X29,108040,
+D02,Sample X3,2286,
+D04,Sample X6,978,
+D06,Sample X9,714,
+D08,Sample X12,887,
+D10,Sample X15,10223,
+D12,Sample X18,6732,
+D14,Sample X21,9080,
+D16,Sample X24,2165,
+D18,Sample X27,5422,
+D20,Sample X30,74036,
+F02,Sample X31,18260,
+F04,Sample X34,16999,
+F06,Sample X37,2713,
+F08,Sample X40,24710,
+F10,Sample X43,292343,
+G02,Sample X32,9785,
+G04,Sample X35,14567,
+G06,Sample X38,10533,
+G08,Sample X41,24817,
+G10,Sample X44,352583,
+H02,Sample X33,12396,
+H04,Sample X36,13936,
+H06,Sample X39,4278,
+H08,Sample X42,28448,
+H10,Sample X45,305739,
+M02,Sample X46,9413,
+M04,Sample X49,2098,
+M06,Sample X52,2281,
+M08,Sample X55,17849,
+M10,Sample X58,190914,
+M12,Sample X61,5957,
+M14,Sample X64,10171,
+M16,Sample X67,11265,
+M18,Sample X70,13875,
+M20,Sample X73,58791,
+M22,Sample X76,47,
+N02,Sample X47,72905,
+N04,Sample X50,16247,
+N06,Sample X53,2753,
+N08,Sample X56,12315,
+N10,Sample X59,145662,
+N12,Sample X62,1975,
+N14,Sample X65,8880,
+N16,Sample X68,2749,
+N18,Sample X71,5489,
+N20,Sample X74,62567,
+N22,Sample X77,53,
+O02,Sample X48,7851,
+O04,Sample X51,16391,
+O06,Sample X54,2582,
+O08,Sample X57,11779,
+O10,Sample X60,169541,
+O12,Sample X63,16412,
+O14,Sample X66,6456,
+O16,Sample X69,10761,
+O18,Sample X72,5456,
+O20,Sample X75,64061,
+O22,Sample X78,44,
+ 
+
+Basic settings
+Measurement type:,Luminescence
+Microplate name:,CORNING 384 LOW VOL FL. BOTTOM
+
+Endpoint settings
+Measurement interval time [s]:,5
+
+Optic settings
+Presetname:,NanoLuc
+Emission:,470-80
+Gain obtained by:,enhanced dynamic range
+Glow correction factor [%]:,0
+Focal height  [mm]:,6.8
+Well used for focus adjustment:,C20
+
+General settings
+Top optic used
+To allow comparison of measurements with different measurement interval times values are normalized to 1 sec.
+Spoon type:,-
+Injection needle holder type:,-
+Reading direction:,bidirectional, horizontal left to right, top to bottom
+Target temperature [°C]:,set off
+Target concentration O2 [%]:,set off
+Target concentration CO2 [%]:,set off
