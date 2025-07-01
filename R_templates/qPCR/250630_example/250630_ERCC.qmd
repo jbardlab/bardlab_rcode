@@ -1,0 +1,223 @@
+---
+title: "Titration of ERCC Spike"
+author: "Jared Bard"
+date: "25/06/30"
+format:
+  html:
+    embed-resources: true
+---
+
+Sample is in vitro transcribed RNA from ERCC_013, prepared by Jeremy Pinheiro. Samples were made by making a dilution of RNA, starting from 1 ng/uL 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE) # options for how knitr displays html documents upon rendering
+
+# first install packages if necessary
+if (!requireNamespace("BiocManager")) install.packages("BiocManager")
+if (!requireNamespace("tidyverse")) install.packages("tidyverse")
+if (!requireNamespace("cowplot")) install.packages("cowplot")
+if (!requireNamespace("ggrepel")) install.packages("ggrepel")
+if (!requireNamespace("scales")) install.packages("scales")
+if (!requireNamespace("ggokabeito")) install.packages("ggokabeito")
+if (!requireNamespace("flextable")) install.packages("flextable")
+if (!requireNamespace("readxl")) install.packages("readxl")
+if (!requireNamespace("broom")) install.packages("broom")
+if (!requireNamespace("devtools")) install.packages("devtools")
+if (!requireNamespace("cat.extras")) devtools::install_github("jabard89/cat.extras") #convenient utility functions like prettier log scales
+
+# then load packages
+library(tidyverse)
+library(cowplot)
+library(cat.extras)
+library(flextable)
+
+
+conflicted::conflicts_prefer(dplyr::filter) # make sure that other packages don't take over "filter"
+okabe_ito_colors <- palette.colors(n = NULL, palette = "Okabe-Ito", recycle = FALSE) #load okabe ito colorblind palette
+`%!in%` = Negate(`%in%`)
+theme_set(theme_half_open(font_size=10))
+```
+
+# reading in the data
+
+```{r}
+src.directory <- c(".")
+
+samples_plate1 <- readxl::read_excel(file.path(src.directory,"250630_samples.xlsx"), sheet = "Plate1") %>%
+  filter(!is.na(RNA_sample)) %>%
+  mutate(Plate = "Plate1")
+samples <- bind_rows(samples_plate1) # in case there are multiple plates of data
+
+plate1 <- readxl::read_excel(file.path(src.directory,"250630-1.xls"), sheet = "Results", skip = 20) %>%
+  mutate(Well = `Well Position`,
+         Ct = as.numeric(CT)) %>%
+  select(Well,Ct,Reporter) %>%
+  right_join(samples_plate1 %>% filter(!is.na(Well)), by = "Well")
+
+cycle_data <- readxl::read_excel(file.path(src.directory,"250630-1.xls"), sheet = "Multicomponent Data", skip = 20) %>%
+  mutate(Well = `Well Position`) %>%
+  select(Well,Cycle,ROX,FAM,VIC,TAMRA,CY5) %>%
+  left_join(samples_plate1 %>% filter(!is.na(Well)), by = "Well") %>%
+  pivot_longer(cols = c(ROX,FAM,VIC,TAMRA,CY5), names_to = "Channel", values_to = "Value") %>%
+  # now go through and match probes to channels
+  mutate(Probe = case_when(Channel == "FAM" ~ Probe_FAM,
+                           Channel == "VIC" ~ Probe_SUN, #SUN and VIC are the same dye
+                           Channel == "CY5" ~ Probe_Cy5))
+
+raw_data <- bind_rows(plate1) %>% 
+  replace_na(list(Skip=FALSE,RT=TRUE)) %>%
+  # now go through and match probes to channels
+  mutate(Probe = case_when(Reporter == "FAM" ~ Probe_FAM,
+                           Reporter == "VIC" ~ Probe_SUN, #SUN and VIC are the same dye
+                           Reporter == "CY5" ~ Probe_Cy5)) %>%
+  filter(!is.na(Probe)) # remove any wells that don't have a probe
+
+data_mean <- raw_data %>%
+  filter(!Skip) %>%
+  group_by(Plate,RNA_sample,Probe,RT) %>%
+  summarise(Ct.SD = sd(Ct),
+            Ct.SE = sd(Ct)/sqrt(n()),
+            Ct.mean = mean(Ct)) %>%
+  ungroup %>%
+  left_join(samples %>% select(-c(Well,Techrep,RT,Skip)) %>% unique, by = c("Plate","RNA_sample"))
+```
+# have a peak at the raw raw data
+
+```{r}
+df <- cycle_data %>%
+  separate(Well, into = c("Row", "Column"), sep = "(?<=\\D)(?=\\d)", remove = F) %>%
+  mutate(Column = factor(as.numeric(Column))) %>%
+  # filter(Row %in% LETTERS[which(LETTERS == "A"):which(LETTERS == "O")],
+  #        Column %in% seq(2,17)) %>%
+  filter(Row %in% c("B","C","E","F","H","I","K","L"),
+         Column %in% seq(2,17)) %>%
+  group_by(Plate,Well) %>%
+  mutate(Value.norm = Value/Value[Channel == "ROX"]) %>%
+  ungroup
+
+ggplot(df %>% filter(Channel %in% c("FAM","CY5","VIC")),
+       aes(x = Cycle, y= Value.norm, color = Channel)) +
+  cowplot::theme_minimal_grid(font_size = 12) +
+  geom_line() + 
+  scale_y_log2nice() + 
+  coord_cartesian(ylim = c(2^-3,2^4)) +
+  facet_grid(Row ~ Column)
+
+```
+# first check the RT
+
+```{r}
+df <- raw_data
+
+p_rt <-  ggplot(df,
+               aes(x = RNA_sample, y = Ct, shape = Techrep)) + 
+  cowplot::theme_minimal_grid(font_size = 12) +
+  cowplot::panel_border() +
+  geom_point(aes(color = RT)) +
+  facet_grid(Probe ~ .) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+p_rt
+```
+
+Generally technical replicates look good, though clearly some noise in hoNLuc_S1 (should be negative for all).
+
+Now let's fit the data to a line of best fit and check the efficiency.
+
+```{r}
+if (!requireNamespace("ggpmisc")) install.packages("ggpmisc")
+library(ggpmisc)
+library(broom)   # For tidy() to easily extract model coefficients
+
+# --- Step 1: Prepare and Analyze the Data ---
+
+# Use the 'raw_data' tibble you have
+# Filter for the specific probe and valid data points
+ercc_data <- raw_data %>%
+  filter(
+    RT == TRUE,
+    !is.na(Ct),
+    Probe == "ERCC_013",
+    RNA_conc_ng_per_uL > 0 # log(0) is undefined, so ensure concentration is positive
+  )
+
+# Fit the linear model outside of ggplot to get the slope
+# We model Ct against the log10 of the concentration
+model <- lm(Ct ~ log10(RNA_conc_ng_per_uL), data = ercc_data)
+
+# Extract the slope using broom::tidy()
+# The slope is the 'estimate' for the term 'log10(RNA_conc_ng_per_uL)'
+slope <- tidy(model) %>%
+  filter(term == "log10(RNA_conc_ng_per_uL)") %>%
+  pull(estimate)
+
+# Calculate the efficiency using the formula
+efficiency <- (10^(-1/slope) - 1) * 100
+
+# Create a text label for the plot annotation
+# The `\n` creates a new line to separate the text from the equation
+efficiency_label <- paste("\nEfficiency:", round(efficiency, 1), "%","\nIdeal is 90%-110%")
+
+
+# --- Step 2: Create the ggplot ---
+
+# Note: The function `scale_x_log10nice()` is from the 'ggprism' package.
+# I am using the standard `scale_x_log10()` from ggplot2 for broader compatibility.
+# If you have ggprism installed, you can use your original function.
+qpcr_plot <- ggplot(
+  data = ercc_data,
+  aes(x = RNA_conc_ng_per_uL, y = Ct) # Color is not needed if only one probe is plotted
+) +
+
+  # Add points for the raw data
+  geom_point(alpha = 0.8, size = 3, color = "firebrick") +
+
+  # Use a logarithmic scale for the x-axis
+  scale_x_log10(
+    breaks = scales::trans_breaks("log10", function(x) 10^x),
+    labels = scales::trans_format("log10", scales::math_format(10^.x)),
+    name = "RNA Concentration (ng/µL)"
+  ) +
+  
+  # Add the line of best fit (linear model 'lm')
+  geom_smooth(method = "lm", se = FALSE, formula = y ~ x, color = "black") +
+
+  # Use stat_poly_eq to add the regression equation and R-squared value
+  stat_poly_eq(
+    formula = y ~ x,
+    aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")),
+    parse = TRUE,
+    label.x = "middle", # Position horizontally
+    label.y = "top" # Position vertically
+  ) +
+  
+  # --- Add the Efficiency Annotation ---
+  # Use annotate() to add the calculated efficiency text to a specific spot
+  ggplot2::annotate(
+    "text",
+    x = max(ercc_data$RNA_conc_ng_per_uL), # Position at the far right
+    y = max(ercc_data$Ct) - 1,            # Position just below the regression equation
+    label = efficiency_label,
+    hjust = 1, # Right-align the text
+    vjust = 1,
+    size = 4,
+    fontface = "bold"
+  ) +
+  
+  # Improve labels and theme
+  labs(
+    title = "qPCR Standard Curve: ERCC_013",
+    subtitle = "Ct Value vs. RNA Concentration",
+    y = "Ct Value"
+  ) +
+  theme_bw() +
+  theme(legend.position = "none") # Hide legend as we only have one series
+
+
+# --- Step 3: Display the Plot ---
+print(qpcr_plot)
+
+# You can also print the calculated values to the console
+cat("Slope:", slope, "\n")
+cat("Efficiency:", efficiency, "%\n")
+```
+
