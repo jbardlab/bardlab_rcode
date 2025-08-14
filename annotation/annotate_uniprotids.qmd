@@ -55,7 +55,7 @@ pull_uniprot_entries <- function(ids, which_cols = c("accession","id","organism_
                                                "lineage","lineage_ids",
                                                "reviewed","virus_hosts",
                                                "sequence"),
-                                 batch_size = 200) {
+                                 batch_size = 500) {
   # batch_size sets how mnany records get pulled at once from the server
   # ids should be uniprot ids
   ids <- unique(na.omit(str_trim(as.character(ids))))
