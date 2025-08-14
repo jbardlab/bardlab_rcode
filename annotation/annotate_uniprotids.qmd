@@ -1,0 +1,125 @@
+---
+title: "Untitled"
+format: html
+---
+```{r}
+#| label: setup
+#| include: false
+# install required packages
+if (!requireNamespace("BiocManager")) install.packages("BiocManager")
+if (!requireNamespace("tidyverse")) install.packages("tidyverse")
+if (!requireNamespace("flowCore")) BiocManager::install("flowCore")
+if (!requireNamespace("cowplot")) install.packages("cowplot")
+if (!requireNamespace("sf")) install.packages("sf")
+if (!requireNamespace("scales")) install.packages("scales")
+if (!requireNamespace("ggokabeito")) install.packages("ggokabeito")
+if (!requireNamespace("ggpattern")) install.packages("ggpattern")
+if (!requireNamespace("ggsignif")) install.packages("ggsignif")
+if (!requireNamespace("flextable")) install.packages("flextable")
+if (!requireNamespace("readxl")) install.packages("readxl")
+if (!requireNamespace("egg")) install.packages("egg")
+if (!requireNamespace("devtools")) install.packages("devtools")
+if (!requireNamespace("arrow")) install.packages("arrow")
+if (!requireNamespace("org.Hs.eg.db")) BiocManager::install("org.Hs.eg.db")
+if (!requireNamespace("biomaRt")) BiocManager::install("biomaRt")
+if (!requireNamespace("UniProt.ws")) BiocManager::install("UniProt.ws")
+if (!requireNamespace("cat.extras")) devtools::install_github("jabard89/cat.extras") #convenient utility functions like prettier log scales
+
+library(tidyverse)
+library(flowCore)
+library(cowplot)
+library(conflicted)
+library(cat.extras)
+library(readxl)
+conflicts_prefer(dplyr::filter)
+
+theme_set(theme_minimal_grid(font_size = 8))
+okabe_ito_colors <- palette.colors(n = NULL, palette = "Okabe-Ito", recycle = FALSE)
+```
+
+
+```{r}
+if (!requireNamespace("BiocManager")) install.packages("BiocManager")
+if (!requireNamespace("UniProt.ws")) BiocManager::install("UniProt.ws")
+
+# function to list all avilable columns in uniprot
+get_available_columns_uniprot <- function() {
+  up <- UniProt.ws::UniProt.ws()
+  UniProt.ws::columns(up)
+}
+
+get_available_columns_uniprot()
+
+# pull uniprot columns
+pull_uniprot_entries <- function(ids, which_cols = c("accession","id","organism_name","organism_id",
+                                               "lineage","lineage_ids",
+                                               "reviewed","virus_hosts",
+                                               "sequence"),
+                                 batch_size = 200) {
+  # batch_size sets how mnany records get pulled at once from the server
+  # ids should be uniprot ids
+  ids <- unique(na.omit(str_trim(as.character(ids))))
+  stopifnot(length(ids) > 0)
+
+  up <- UniProt.ws::UniProt.ws()  # no args; works across recent Bioc releases
+  
+  kt <- "UniProtKB"
+  
+  # Ask UniProt.ws which columns it supports, then pick taxonomy-related ones.
+  cols <- BiocGenerics::intersect(
+    which_cols,
+    UniProt.ws::columns(up)
+  )
+  
+  batches <- split(ids, ceiling(seq_along(ids)/batch_size))
+
+  fetch_one <- function(keys) {
+    tryCatch(
+      UniProt.ws::select(up, keys = keys, columns = cols, keytype = kt),
+      error = function(e) {
+        # retry 1-by-1 in case one bad ID poisons the batch
+        map_dfr(keys, ~ tryCatch(
+          UniProt.ws::select(up, keys = .x, columns = cols, keytype = kt),
+          error = function(e2) tibble(accession = .x, .error = conditionMessage(e2))
+        ))
+      }
+    )
+  }
+
+  out <- map_dfr(batches, fetch_one)
+  
+  out %>%
+    distinct() %>%
+    rename("UniProtKB" = "Entry") %>%
+    as_tibble()
+}
+
+split_lineage_to_cols <- function(df, lineage_col) {
+    col <- ensym(lineage_col)
+  
+    df %>%
+      mutate(.row_id = row_number(),
+             .parts  = str_split(!!col, "[,;]\\s*")) %>%           # split on commas/semicolons
+      unnest_longer(.parts, values_to = "part") %>%                # one row per piece
+      mutate(
+        rank = str_to_lower(str_extract(part, "(?<=\\().*?(?=\\))")),    # text inside (...)
+        name = str_squish(str_remove(part, "\\s*\\(.*\\)$"))            # text before (...)
+      ) %>%
+      filter(!is.na(rank), nzchar(rank)) %>%
+      mutate(rank = str_replace_all(rank, "[\\s-]+", "_")) %>%     # e.g., "no rank" -> "no_rank"
+      group_by(.row_id, rank) %>%
+      summarize(name = dplyr::last(name), .groups = "drop") %>%    # last wins for duplicate ranks
+      pivot_wider(names_from = rank, values_from = name) %>%
+      right_join(df %>% mutate(.row_id = row_number()), by = ".row_id") %>%
+      select(-.row_id)
+}
+```
+
+# example
+
+```{r}
+df_test <- pull_uniprot_entries(c("P69905","Q8N158","Q9Y2Q0","Q80HU0")) %>%
+  split_lineage_to_cols("Taxonomic.lineage")
+```
+
+

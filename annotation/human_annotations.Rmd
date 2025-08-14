@@ -1,0 +1,91 @@
+---
+title: "250812 Annotations"
+author: "Jared Bard"
+date: "08/12/2025"
+format: 
+  html:
+    code-fold: true
+---
+
+```{r}
+#| label: setup
+#| include: false
+# install required packages
+if (!requireNamespace("BiocManager")) install.packages("BiocManager")
+if (!requireNamespace("tidyverse")) install.packages("tidyverse")
+if (!requireNamespace("flowCore")) BiocManager::install("flowCore")
+if (!requireNamespace("cowplot")) install.packages("cowplot")
+if (!requireNamespace("sf")) install.packages("sf")
+if (!requireNamespace("scales")) install.packages("scales")
+if (!requireNamespace("ggokabeito")) install.packages("ggokabeito")
+if (!requireNamespace("ggpattern")) install.packages("ggpattern")
+if (!requireNamespace("ggsignif")) install.packages("ggsignif")
+if (!requireNamespace("flextable")) install.packages("flextable")
+if (!requireNamespace("readxl")) install.packages("readxl")
+if (!requireNamespace("egg")) install.packages("egg")
+if (!requireNamespace("devtools")) install.packages("devtools")
+if (!requireNamespace("arrow")) install.packages("arrow")
+if (!requireNamespace("org.Hs.eg.db")) BiocManager::install("org.Hs.eg.db")
+if (!requireNamespace("biomaRt")) BiocManager::install("biomaRt")
+if (!requireNamespace("cat.extras")) devtools::install_github("jabard89/cat.extras") #convenient utility functions like prettier log scales
+
+library(tidyverse)
+library(flowCore)
+library(cowplot)
+library(conflicted)
+library(cat.extras)
+library(readxl)
+conflicts_prefer(dplyr::filter)
+
+theme_set(theme_minimal_grid(font_size = 8))
+okabe_ito_colors <- palette.colors(n = NULL, palette = "Okabe-Ito", recycle = FALSE)
+```
+```{r}
+library(biomaRt)
+
+ensembl <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+
+# Get RefSeq protein IDs (NP_)
+refseq_proteins_gnid <- getBM(
+  attributes = c(
+    "uniprot_gn_id",
+    "ensembl_peptide_id",     # Ensembl protein ID
+    "refseq_peptide"          # RefSeq protein ID (NP_, XP_, etc.)
+  ),
+  mart = ensembl
+)
+
+refseq_proteins <- getBM(
+  attributes = c(
+    "ensembl_peptide_id",     # Ensembl protein ID
+    "uniprotswissprot",       # UniProtKB/Swiss-Prot accession
+    "hgnc_symbol",            # Official gene symbol
+    "refseq_peptide"          # RefSeq protein ID (NP_, XP_, etc.)
+  ),
+  mart = ensembl
+) %>%
+  left_join(refseq_proteins_gnid)
+
+write_csv(refseq_proteins,"refseq_human_annotations.csv")
+head(refseq_proteins)
+```
+
+```{r}
+# Create UniProt.ws object
+human_annotations <- AnnotationDbi::select(org.Hs.eg.db::org.Hs.eg.db,
+                           keys = AnnotationDbi::keys(org.Hs.eg.db::org.Hs.eg.db, keytype = "UNIPROT"),
+                           columns = c("UNIPROT", "REFSEQ", "GENENAME", "SYMBOL", "ALIAS"),
+                           keytype = "UNIPROT") %>%
+  as_tibble() %>%
+  rename(
+    uniprot_id = UNIPROT,
+    protein_name = GENENAME,
+    gene_symbol = SYMBOL,
+    gene_alias = ALIAS
+  )
+
+# Remove duplicates if needed
+human_annotations <- human_annotations %>%
+  distinct(uniprot_id, .keep_all = TRUE)
+write_csv(human_annotations,"human_annotations.csv")
+```
