@@ -1,0 +1,160 @@
+---
+title: "Analyze Polysome"
+author: "Jared Bard"
+date: "2025-05-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+if (!requireNamespace("BiocManager")) install.packages("BiocManager")
+if (!requireNamespace("tidyverse")) install.packages("tidyverse")
+if (!requireNamespace("flowCore")) BiocManager::install("flowCore")
+if (!requireNamespace("cowplot")) install.packages("cowplot")
+if (!requireNamespace("sf")) install.packages("sf")
+if (!requireNamespace("scales")) install.packages("scales")
+if (!requireNamespace("ggokabeito")) install.packages("ggokabeito")
+if (!requireNamespace("extrafont")) install.packages("extrafont")
+if (!requireNamespace("ggsignif")) install.packages("ggsignif")
+if (!requireNamespace("flextable")) install.packages("flextable")
+if (!requireNamespace("readxl")) install.packages("readxl")
+if (!requireNamespace("egg")) install.packages("egg")
+if (!requireNamespace("devtools")) install.packages("devtools")
+if (!requireNamespace("cat.extras")) devtools::install_github("jabard89/cat.extras") #convenient utility functions like prettier log scales
+
+`%!in%` = Negate(`%in%`)
+library(tidyverse)
+library(cowplot)
+library(conflicted)
+library(cat.extras)
+library(readxl)
+
+if (!"Arial" %in% fonts()) {
+  cat("Importing Arial font...\n")
+  extrafont::font_import(pattern = "Arial", prompt = FALSE)
+}
+extrafont::loadfonts(device = "pdf", quiet = TRUE)
+
+conflicts_prefer(dplyr::filter)
+
+theme_set(theme_minimal_grid(font_size = 12, font_family = "Arial"))
+okabe_ito <- list(
+  black = "#000000",
+  orange = "#E69F00", 
+  sky_blue = "#56B4E9",
+  bluish_green = "#009E73",
+  yellow = "#F0E442",
+  blue = "#0072B2",
+  vermillion = "#D55E00",
+  reddish_purple = "#CC79A7"
+)
+```
+
+
+```{r}
+frac_distance <- 5.63 # how many mm is each fraction
+samplesheet <- read_excel("250529_polysome_samples.xlsx", sheet="Sheet1")
+
+data_dir1 <- file.path(".")
+
+# position of the 40S and 80S peak (used for normalization)
+# recommendation is to leave at defaults first time, then look at raw graph and adjust per sample
+start_stop <- tribble(
+ ~Sample_ID, ~Start_40S, ~Start_80S, ~Biorep,
+ "S1",       3,        5.2,        "BR1",
+ "S2",       3,        5.2,        "BR1",
+ "S3",       3,        5.2,        "BR1",
+ "S4",       3,        5.2,        "BR1",
+ "S5",       3,        5.2,        "BR1",
+ "S6",       3,        5.2,        "BR1",
+ "blank",    3,        5.2,        "BR1",
+ "S1",       3.3,        5.55,        "BR2",
+ "S2",       3.5,        5.55,        "BR2",
+ "S3",       3.3,        5.55,        "BR2",
+ "S4",       3.5,        5.55,        "BR2",
+ "S5",       3.3,        5.55,        "BR2",
+ "S6",       3.3,        5.55,        "BR2"
+)
+monosome_width <- 1.2
+polysome_width <- 8
+sample_table1 <- samplesheet %>%
+  left_join(start_stop, by = c("Sample_ID","Biorep")) %>%
+  mutate(file_path = paste0(data_dir1,"/",samplesheet$fileName)) %>%
+  mutate("End_mono" = Start_80S+monosome_width,
+         "End_poly" = Start_80S+polysome_width)
+
+sample_table <- bind_rows(sample_table1) # can combine multiple runs into one sample table here
+df <- sample_table %>% select(Sample_ID,file_path) %>% pmap(function(Sample_ID,file_path){
+  # first read in files
+  read_csv(file_path,skip=48,col_names=c("c1","c2","Position","A260","c3","c4"),
+           show_col_types = FALSE) %>%
+    select(Position,A260) %>%
+    mutate("Sample_ID" = Sample_ID,
+           "file_path" = file_path) %>%
+    mutate(Frac_ID = Position%/%frac_distance+1,
+           Fraction = Position/frac_distance+1)
+}) %>% bind_rows %>%
+  # join to the sample_table
+  left_join(sample_table,by=c("Sample_ID","file_path")) %>%
+  group_by(file_path) %>%
+  nest %>%
+  # normalize every trace by subtracting the minimum signal and dividing by the total signal after the 80S
+  mutate(data = map(data,function(df){
+    background <- min(df$A260)
+    #background <- 0
+    print(background)
+    total_signal <- sum(df %>% filter(Fraction >=Start_80S & Fraction <= End_poly) %>%
+                          pull(A260) - background)
+    df %>% mutate(A260_norm = (A260-background)/total_signal) %>%
+      mutate("background" = background)
+  })) %>%
+  unnest(data) %>%
+  ungroup %>% 
+  # calculuate an aligned X-axis so that all 80S peaks are at the same place
+  mutate(Fraction_offset = Fraction-Start_80S+8) %>%
+  # divide up into different 
+  mutate(Frac_group = case_when(Fraction < Start_40S ~ "Free",
+                          Fraction >= Start_40S & Fraction < Start_80S ~ "40S/60S",
+                          Fraction >= Start_80S & Fraction < End_mono ~ "Mono",
+                          Fraction >= End_mono & Fraction < End_poly ~ "Poly",
+                          Fraction >= End_poly ~ "background"))
+
+# plot the raw data
+p_raw <- ggplot(df,
+                aes(x=Fraction,y=A260-background))+
+  #geom_hline(aes(yintercept = background), linetype = "dotted", size = 0.5) +
+  geom_vline(data=sample_table,aes(xintercept=Start_40S),linetype="dotted")+
+  geom_vline(data=sample_table,aes(xintercept=Start_80S),linetype="dotted")+
+  geom_vline(data=sample_table,aes(xintercept=End_mono),linetype="dotted")+
+  geom_vline(data=sample_table,aes(xintercept=End_poly),linetype="dotted")+
+  geom_line() +
+  scale_x_continuous(breaks=seq(1,14))+
+  # adjust the axis limits here
+  coord_cartesian(ylim=c(-0.1,3))+
+  facet_grid(Sample_ID~Date)
+p_raw
+
+# plot the normalized data overlayed
+p_plot <- ggplot(df %>% filter(Strain != "Blank"),
+       aes(x=Fraction_offset,y=A260_norm,color=Treatment))+
+  geom_line(aes(group=file_path),size=1) +
+  coord_cartesian(xlim = c(5,16), y = c(0,0.025)) +
+  ggokabeito::scale_color_okabe_ito() +
+  scale_linetype_manual(values=c("T492A" = "dotted","WT" = "solid")) +
+  theme(axis.text.x=element_blank(),axis.text.y=element_blank(),
+        axis.ticks.x=element_blank(),axis.ticks.y=element_blank())+
+  labs(x="",y="Abs (260nm)") +
+  facet_wrap(facets = "Biorep", ncol = 1)
+p_plot
+
+df_frac_sum <- df %>% 
+  group_by(file_path,Sample_ID,Treatment,Biorep,Frac_group,Date) %>%
+  summarise(Abs_sum = sum(A260-background)) %>%
+  pivot_wider(names_from=Frac_group, values_from = Abs_sum) %>%
+  mutate(Poly.over.mono = Poly/Mono)
+  
+df_frac_sum %>% ungroup %>% select(Date,Biorep,Treatment,Poly.over.mono) %>%
+  mutate(Poly.over.mono = formatC(Poly.over.mono,digits=2)) %>%
+  select(Treatment,Biorep,Poly.over.mono) %>%
+  flextable::flextable()
+```
