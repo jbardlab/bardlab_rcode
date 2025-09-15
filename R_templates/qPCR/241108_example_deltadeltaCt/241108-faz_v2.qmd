@@ -31,7 +31,16 @@ library(flextable)
 
 
 conflicted::conflicts_prefer(dplyr::filter) # make sure that other packages don't take over "filter"
-okabe_ito_colors <- palette.colors(n = NULL, palette = "Okabe-Ito", recycle = FALSE) #load okabe ito colorblind palette
+okabe_ito_colors <- list(
+  black = "#000000",
+  orange = "#E69F00", 
+  sky_blue = "#56B4E9",
+  bluish_green = "#009E73",
+  yellow = "#F0E442",
+  blue = "#0072B2",
+  vermillion = "#D55E00",
+  reddish_purple = "#CC79A7"
+)
 `%!in%` = Negate(`%in%`)
 theme_set(theme_half_open(font_size=10))
 ```
@@ -61,6 +70,7 @@ cycle_data <- readxl::read_excel(file.path(src.directory,"2024-11-08_ThuN.xls"),
   pivot_longer(cols = c(ROX,FAM,VIC,TAMRA,CY5), names_to = "Channel", values_to = "Value") %>%
   # now go through and match probes to channels
   mutate(Probe = case_when(Channel == "FAM" ~ Probe_FAM,
+                           Channel == "TAMRA" ~ Probe_TAMRA,
                            Channel == "VIC" ~ Probe_SUN, #SUN and VIC are the same dye
                            Channel == "CY5" ~ Probe_Cy5))
 
@@ -68,6 +78,7 @@ raw_data <- bind_rows(plate1) %>%
   replace_na(list(Skip=FALSE,RT=TRUE)) %>%
   # now go through and match probes to channels
   mutate(Probe = case_when(Reporter == "FAM" ~ Probe_FAM,
+                           Reporter == "TAMRA" ~ Probe_TAMRA,
                            Reporter == "VIC" ~ Probe_SUN, #SUN and VIC are the same dye
                            Reporter == "CY5" ~ Probe_Cy5)) %>%
   filter(!is.na(Probe)) # remove any wells that don't have a probe
@@ -79,7 +90,7 @@ data_mean <- raw_data %>%
             Ct.SE = sd(Ct)/sqrt(n()),
             Ct.mean = mean(Ct)) %>%
   ungroup %>%
-  left_join(samples %>% select(-c(Well,Techrep,RT,Skip)) %>% unique, by = c("Plate","RNA_sample"))
+  left_join(samples %>% select(-c(Well,Techrep,RT,Skip), -starts_with("Probe_")) %>% unique, by = c("Plate","RNA_sample"))
 ```
 # have a peak at the raw raw data
 
@@ -87,15 +98,13 @@ data_mean <- raw_data %>%
 df <- cycle_data %>%
   separate(Well, into = c("Row", "Column"), sep = "(?<=\\D)(?=\\d)", remove = F) %>%
   mutate(Column = factor(as.numeric(Column))) %>%
-  # filter(Row %in% LETTERS[which(LETTERS == "A"):which(LETTERS == "O")],
-  #        Column %in% seq(2,17)) %>%
-  filter(Row %in% c("B","C","E","F","H","I","K","L"),
-         Column %in% seq(2,17)) %>%
+  filter(Row %in% LETTERS[which(LETTERS == "A"):which(LETTERS == "O")],
+         Column %in% seq(1,24)) %>%
   group_by(Plate,Well) %>%
   mutate(Value.norm = Value/Value[Channel == "ROX"]) %>%
   ungroup
 
-ggplot(df %>% filter(Channel %in% c("FAM","CY5","VIC")),
+ggplot(df %>% filter(Channel %in% c("FAM","TAMRA","CY5","VIC")),
        aes(x = Cycle, y= Value.norm, color = Channel)) +
   cowplot::theme_minimal_grid(font_size = 12) +
   geom_line() + 
@@ -150,17 +159,6 @@ ggplot(df,
   facet_grid(Virus_MOI ~ Time_hr)
 ```
 
-Let's first look at all the raw Ct values
-
-```{r}
-df <- data_mean %>% filter(RT == TRUE)
-ggplot(df,
-       aes( x = factor(Time_hr), y = Ct.mean, color = factor(Virus_MOI))) +
-  geom_point() +
-  ggokabeito::scale_color_okabe_ito() +
-  facet_grid(FAZ3532_50uM ~ Probe)
-```
-
 # calculating relative abundances
 
 Use the ∆∆Ct method to calculate the relative abundance of transcripts across conditions, normalized to a reference gene (GAPDH here):
@@ -183,11 +181,12 @@ ref_moi        <- 1
 # ----------------------------
 df_rt <- data_mean %>%
   filter(RT == TRUE) %>%
-  select(Bio_Sample, Probe, Time_hr, FAZ3532_50uM, Virus_MOI, Ct.mean, Ct.SE)
+  select(Bio_Sample, RNA_sample, Probe, Time_hr, FAZ3532_50uM, Virus_MOI, Ct.mean, Ct.SE)
 
 # ----------------------------
 # 2) Reference CONDITION values per Probe
 #    (Time = ref_time, FAZ=ref_treatment, MOI=ref_moi)
+# Computes mean of all biological samples at that condition
 # ----------------------------
 ref_cond_by_probe <- df_rt %>%
   filter(Time_hr == ref_time,
@@ -215,12 +214,12 @@ ref_probe_constants <- ref_cond_by_probe %>%
 # stopifnot(nrow(ref_probe_constants) == 1)
 
 # ----------------------------
-# 4) Reference PROBE per BIOLOGICAL SAMPLE
+# 4) Reference PROBE per RNA sample
 #    (housekeeper measured in the same sample)
 # ----------------------------
 ref_probe_by_sample <- df_rt %>%
   filter(Probe == ref_probe) %>%
-  select(Bio_Sample,
+  select(RNA_sample,
          Ct.refProbe    = Ct.mean,
          Ct.refProbe.se = Ct.SE) %>%
   distinct()
@@ -232,11 +231,9 @@ df_merged <- df_rt %>%
   # add reference-condition stats for the matching probe
   left_join(ref_cond_by_probe, by = "Probe") %>%
   # add reference-probe value for the matching biological sample
-  left_join(ref_probe_by_sample, by = "Bio_Sample") %>%
+  left_join(ref_probe_by_sample, by = "RNA_sample") %>%
   # cross-join the single-row constants so they're available to every row
-  mutate(join_key = 1) %>%
-  left_join(ref_probe_constants %>% mutate(join_key = 1), by = "join_key") %>%
-  select(-join_key)
+  cross_join(ref_probe_constants)
 
 # ----------------------------
 # 6) Final calculations (ΔΔCt, Rel. abundance, and SE propagation)
