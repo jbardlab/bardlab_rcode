@@ -283,10 +283,10 @@ ref_condition_by_probe <- df_rt_total %>%
   )
 
 # ----------------------------
-# 3) Reference PROBE’s value under the reference fraction
+# 3) Reference PROBE’s value under the reference CONDITION
 #    (a single-row tibble holding constants for all rows)
 # ----------------------------
-ref_probe_constants <- ref_fraction_by_probe %>%
+ref_probe_constants <- ref_condition_by_probe %>%
   filter(Probe == ref_probe) %>%
   transmute(
     Ct.refCond.refProbe    = Ct.refCond,
