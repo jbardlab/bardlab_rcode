@@ -1,0 +1,439 @@
+---
+title: "Polysome Template"
+author: "Jared Bard"
+date: "12/19/2025"
+format: 
+  html:
+    embed-resources: true
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE) # options for how knitr displays html documents upon rendering
+
+# first install packages if necessary
+if (!requireNamespace("BiocManager")) install.packages("BiocManager")
+if (!requireNamespace("tidyverse")) install.packages("tidyverse")
+if (!requireNamespace("cowplot")) install.packages("cowplot")
+if (!requireNamespace("ggrepel")) install.packages("ggrepel")
+if (!requireNamespace("scales")) install.packages("scales")
+if (!requireNamespace("ggokabeito")) install.packages("ggokabeito")
+if (!requireNamespace("flextable")) install.packages("flextable")
+if (!requireNamespace("readxl")) install.packages("readxl")
+if (!requireNamespace("devtools")) install.packages("devtools")
+if (!requireNamespace("cat.extras")) devtools::install_github("jabard89/cat.extras") #convenient utility functions like prettier log scales
+
+# then load packages
+library(tidyverse)
+library(cowplot)
+library(cat.extras)
+library(flextable)
+
+
+conflicted::conflicts_prefer(dplyr::filter) # make sure that other packages don't take over "filter"
+okabe_ito_colors <- list(
+  black = "#000000",
+  orange = "#E69F00", 
+  sky_blue = "#56B4E9",
+  bluish_green = "#009E73",
+  yellow = "#F0E442",
+  blue = "#0072B2",
+  vermillion = "#D55E00",
+  reddish_purple = "#CC79A7"
+)
+`%!in%` = Negate(`%in%`)
+theme_set(theme_half_open(font_size=10))
+```
+
+# reading in the data
+
+
+```{r}
+src.directory <- c(".")
+
+samples_plate1 <- readxl::read_excel(file.path(src.directory,"251219_test2_samples.xlsx"), sheet = "Plate1") %>%
+  filter(!is.na(RNA_sample)) %>%
+  mutate(Plate = "Plate1")
+samples <- bind_rows(samples_plate1)  %>%
+  mutate(Fraction = factor(Fraction, levels = c("Total","1-4", "5-6", "7-8", "9-10", "11-15"))) # adds order to fractions for plotting
+# this is the real data
+sample1_file <- "251219_Test2.xlsx"
+plate1 <- readxl::read_excel(file.path(src.directory,sample1_file), sheet = "Results", skip = 19) %>%
+  mutate(Well = `Well Position`,
+         Ct = as.numeric(CT)) %>%
+  select(Well,Ct,Reporter) %>%
+  right_join(samples_plate1 %>% filter(!is.na(Well)), by = "Well")
+
+# this is the raw data for QC purposes
+cycle_data <- readxl::read_excel(file.path(src.directory,sample1_file), sheet = "Multicomponent Data", skip = 19) %>%
+  mutate(Well = `Well Position`) %>%
+  filter(Cycle <= 40) %>%
+  select(Well,Cycle,ROX,SYBR) %>%
+  left_join(samples_plate1 %>% filter(!is.na(Well)), by = "Well") %>%
+  pivot_longer(cols = c(ROX,SYBR), names_to = "Channel", values_to = "Value")
+
+melt_data <- readxl::read_excel(file.path(src.directory,sample1_file), sheet = "Melt Curve Raw Data", skip = 19) %>%
+  mutate(Well = `Well Position`) %>%
+  select(Well,Reading,Temperature,Fluorescence,Derivative) %>%
+  left_join(samples_plate1 %>% filter(!is.na(Well)), by = "Well") %>%
+  filter(!is.na(Probe))
+
+melt_peaks <- readxl::read_excel(file.path(src.directory,sample1_file), sheet = "Melt Curve Result", skip = 19) %>%
+  mutate(Well = `Well Position`,
+         Peak_height = `Melt Peak Height`) %>%
+  select(Well,Tm,Peak_height) %>%
+  left_join(samples_plate1 %>% filter(!is.na(Well)), by = "Well") %>%
+  filter(!is.na(Probe)) %>%
+  group_by(Well) %>%
+  mutate(N_peaks = n())
+
+raw_data <- bind_rows(plate1) %>% 
+  replace_na(list(Skip=FALSE,RT=TRUE)) %>%
+  filter(!is.na(Probe)) # remove any wells that don't have a probe
+
+data_mean <- raw_data %>%
+  filter(!Skip) %>%
+  group_by(Plate,RNA_sample,RNA_conc_ng_per_uL,Probe,RT) %>%
+  summarise(Ct.SD = sd(Ct),
+            Ct.SE = sd(Ct)/sqrt(n()),
+            Ct.mean = mean(Ct)) %>%
+  ungroup %>%
+  left_join(samples %>% select(-c(Well,Techrep,RT,Skip),-starts_with("Probe_")) %>% unique, by = c("Plate","RNA_sample"))
+```
+# have a peak at the raw raw data
+
+```{r}
+df_cycles <- cycle_data %>%
+  separate(Well, into = c("Row", "Column"), sep = "(?<=\\D)(?=\\d)", remove = F) %>%
+  mutate(Column = factor(as.numeric(Column))) %>%
+  filter(Row %in% LETTERS[which(LETTERS == "A"):which(LETTERS == "O")],
+         Column %in% seq(1,24)) %>%
+  group_by(Plate,Well,Cycle) %>%
+  mutate(Value.norm = Value/Value[Channel == "ROX"]) %>%
+  ungroup
+
+ggplot(df_cycles %>% filter(Channel %in% c("SYBR")),
+       aes(x = Cycle, y= Value.norm, color = Channel)) +
+  cowplot::theme_minimal_grid(font_size = 12) +
+  geom_line() + 
+  scale_y_log2nice() + 
+  coord_cartesian(ylim = c(2^-3,2^4)) +
+  facet_grid(Row ~ Column)
+```
+```{r}
+df_rox <- cycle_data %>%
+  separate(Well, into = c("Row", "Column"), sep = "(?<=\\D)(?=\\d)", remove = F) %>%
+  mutate(Column = factor(as.numeric(Column))) %>%
+  filter(Row %in% LETTERS[which(LETTERS == "A"):which(LETTERS == "O")],
+         Column %in% seq(1,24)) %>%
+  filter(!is.na(Probe), Channel == "ROX") %>% # filter for just wells in the spreadsheet
+  mutate(Rox.norm = Value/mean(Value)) %>%
+  ungroup
+
+ggplot(df_rox,
+       aes(x = Cycle, y= Rox.norm, color = Channel)) +
+  cowplot::theme_half_open(font_size = 12) +
+  geom_hline(yintercept = 1, linetype = "dotted") +
+  geom_line() + 
+  scale_y_log2nice() +
+  facet_grid(Row ~ Column)
+```
+
+I noticed that H10 looks weird here, so I should keep an eye on those results (may need to be skipped).
+
+# look at the melt peaks
+If there are any melt curves with multiple peaks, that probably means the qPCR results are not reliable because the product is not clean. A single product should yield a single melt curve.
+
+```{r}
+df_melt <- melt_data %>%
+  filter(RNA_conc_ng_per_uL != 0) %>%
+  separate(Well, into = c("Row", "Column"), sep = "(?<=\\D)(?=\\d)", remove = F) %>%
+  mutate(Column = factor(as.numeric(Column))) %>%
+  filter(Row %in% LETTERS[which(LETTERS == "A"):which(LETTERS == "O")],
+         Column %in% seq(1,24)) %>%
+  left_join(melt_peaks %>% select(Well,Tm,Peak_height,N_peaks), by = "Well")
+
+ggplot(df_melt,
+       aes(x = Temperature, y= Derivative)) +
+  cowplot::theme_minimal_grid(font_size = 12) +
+  geom_line(aes(color = RT, group = Well)) + 
+  facet_wrap(facets = "Probe")
+
+ggplot(df_melt %>% filter(N_peaks > 1),
+       aes(x = Temperature, y= Derivative)) +
+  cowplot::theme_minimal_grid(font_size = 12) +
+  geom_line(aes(color = RT, group = Well)) + 
+  facet_wrap(facets = "Well") +
+  labs(subtitle = "Potential Problems")
+```
+# now check the RT
+```{r}
+df <- raw_data
+
+p_rt <-  ggplot(df,
+               aes(x = RNA_sample, y = Ct, shape = Techrep, alpha = Skip)) + 
+  cowplot::theme_minimal_grid(font_size = 12) +
+  scale_alpha_manual(values = c(1,0.4), guide = "none") +
+  cowplot::panel_border() +
+  geom_point(aes(color = RT)) +
+  facet_grid(Probe ~ .) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+p_rt
+```
+
+```{r}
+raw_data %>% filter(RT == TRUE) %>% 
+  group_by(RNA_sample,Probe) %>%
+  mutate(Ct.SD = sd(Ct),
+            Ct.mean = mean(Ct)) %>%
+  select(Well,RNA_sample,Probe,Techrep,Ct,Ct.SD,Ct.mean) %>% 
+  arrange(desc(Ct.SD)) %>%
+  flextable %>% autofit
+```
+
+
+# calculating relative abundances
+
+Use the ∆∆Ct method to calculate the relative abundance of transcripts across conditions, normalized to a reference gene:
+https://www.nature.com/articles/nprot.2008.73.
+
+
+```{r}
+# ----------------------------
+# 0) Parameters
+# ----------------------------
+ref_probe      <- "ERCC25"
+ref_fraction       <- "Total" # identifies which fraction to use as the reference
+
+# ----------------------------
+# 1) Keep only RT(+) rows and essential columns to describe your samples (like dKO and Biorep here)
+# ----------------------------
+df_rt <- data_mean %>%
+  filter(RT == TRUE) %>%
+  select(Probe, Bio_sample, RNA_sample, Fraction, dKO, Biorep, Ct.mean, Ct.SE)
+
+
+# ----------------------------
+# 2) Reference FRACTION values per Probe
+# ----------------------------
+ref_fraction_by_probe <- df_rt %>%
+  filter(Fraction == ref_fraction) %>%
+  group_by(Probe,Bio_sample) %>%
+  summarise(
+    Ct.refCond    = mean(Ct.mean, na.rm = TRUE),
+    Ct.refCond.se = sqrt(sum((Ct.SE %>% replace_na(0))^2)) / sqrt(n()),
+    .groups = "drop"
+  )
+
+# ----------------------------
+# 3) Reference PROBE’s value under the reference fraction
+#    (a single-row tibble holding constants for all rows)
+# ----------------------------
+ref_probe_by_Bio_sample <- ref_fraction_by_probe %>%
+  filter(Probe == ref_probe) %>%
+  transmute(
+    Ct.refCond.refProbe    = Ct.refCond,
+    Ct.refCond.refProbe.se = Ct.refCond.se,
+    Bio_sample = Bio_sample
+  )
+
+# If the reference probe is missing, you may want to stop with a clear error:
+# stopifnot(nrow(ref_probe_constants) == 1)
+
+# ----------------------------
+# 4) Reference PROBE per RNA Sample
+# ----------------------------
+ref_probe_by_RNA_sample <- df_rt %>%
+  filter(Probe == ref_probe) %>%
+  select(RNA_sample,
+         Ct.refProbe    = Ct.mean,
+         Ct.refProbe.se = Ct.SE) %>%
+  distinct()
+
+# ----------------------------
+# 5) Build the analysis table by merging everything
+# ----------------------------
+
+df_merged <- df_rt %>%
+  left_join(ref_fraction_by_probe, by = c("Probe","Bio_sample")) %>%
+  left_join(ref_probe_by_RNA_sample, by = "RNA_sample") %>%
+  left_join(ref_probe_by_Bio_sample, by= "Bio_sample")
+
+# ----------------------------
+# 6) Final calculations (ΔΔCt, Rel. abundance, and SE propagation)
+# ----------------------------
+df_poly_abund <- df_merged %>%
+  mutate(
+    # ΔCt for each row vs. the ref probe measured in the same sample
+    delta_ct = Ct.mean - Ct.refProbe,
+
+    # ΔCt for the reference condition (probe vs. ref probe under ref condition)
+    delta_ct_refCond = Ct.refCond - Ct.refCond.refProbe,
+
+    # ΔΔCt and relative abundance
+    delta_delta_ct = delta_ct - delta_ct_refCond,
+    Rel_abund      = 2^(-delta_delta_ct),
+
+    # SE propagation
+    delta_ct_se = sqrt((Ct.SE %>% replace_na(0))^2 +
+                       (Ct.refProbe.se %>% replace_na(0))^2),
+
+    delta_ct_refCond_se = sqrt((Ct.refCond.se %>% replace_na(0))^2 +
+                               (Ct.refCond.refProbe.se %>% replace_na(0))^2),
+
+    delta_delta_ct_se = sqrt(delta_ct_se^2 + delta_ct_refCond_se^2),
+    Rel_abund_se      = Rel_abund * log(2) * delta_delta_ct_se
+  ) %>%
+  group_by(Bio_sample, Probe) %>%
+  mutate(Rel_abund_norm = Rel_abund / sum(Rel_abund[Fraction != "Total"], na.rm = TRUE))
+
+# df_out is your final tibble with everything computed.
+
+p_poly <- ggplot(df_poly_abund %>% filter(Fraction != "Total", Probe != "ERCC25"),
+       aes(x = factor(Fraction), y = Rel_abund_norm, color = dKO)) +
+  geom_point() +
+  geom_line(aes(group = Bio_sample)) +
+  #stat_summary(fun = mean, geom = "crossbar", width = 0.5) +
+  ggokabeito::scale_color_okabe_ito() +
+  #scale_y_log10nice() +
+  facet_grid(. ~ Probe)
+p_poly
+```
+```{r}
+df <- df_poly_abund %>%
+  filter(Fraction != "Total", Probe %in% c("GAPDH_S1","ATF4_S1")) %>%
+  mutate(
+    # Create a new column with the desired labels using recode()
+    N_ribosomes = recode(Fraction,
+      "1-4"   = "0",
+      "5-6"   = "1",
+      "7-8"   = "2-4",
+      "9-10"  = "5-7",
+      "11-15" = "8+"
+    ),
+    # IMPORTANT: Convert it to a factor with the correct order
+    N_ribosomes = factor(N_ribosomes, levels = c("0", "1", "2-4", "5-7", "8+"))
+  )
+
+p <- ggplot(df,
+       aes(x = N_ribosomes, y = Rel_abund_norm, color = dKO)) +
+  theme_half_open(font_size = 7) +
+  geom_point() +
+  geom_line(aes(group = Bio_sample)) +
+  #stat_summary(fun = mean, geom = "crossbar", width = 0.5) +
+  ggokabeito::scale_color_okabe_ito() +
+  #scale_y_log10nice() +
+  facet_grid(Probe ~ .) +
+  labs(x = "# of ribosomes", y = "Fraction of Total RNA") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+p
+ggsave("250911_Jayabalan_U2OS_WT_dKO_qPCR_polysome_profile.pdf", egg::set_panel_size(p, width = unit(2, "cm"), height = unit(1.5,"cm")))
+```
+
+
+# now plot the relative changes in the Totals (reflecting changes in mRNA abundance)
+
+
+```{r}
+# ----------------------------
+# 0) Parameters
+# ----------------------------
+ref_probe      <- "GAPDH" # internal reference RNA to normalize totals
+ref_fraction       <- "Total" # identifies which fraction to use as the reference
+# now let's set the filters to find the correct reference biological sample
+# this could be multiple conditions
+ref_sample <- rlang::quos(
+  dKO == "FALSE"
+)
+
+# ----------------------------
+# 1) Keep only RT(+) rows and essential columns
+# ----------------------------
+df_rt_total <- data_mean %>%
+  filter(RT == TRUE) %>%
+  filter(Fraction == ref_fraction) %>%
+  select(Probe, Bio_sample, RNA_sample, Fraction, dKO, Biorep, Ct.mean, Ct.SE)
+
+
+# ----------------------------
+# 2) Reference CONDITION values per Probe
+# ----------------------------
+ref_condition_by_probe <- df_rt_total %>%
+  filter(!!!ref_sample) %>%
+  group_by(Probe) %>%
+  summarise(
+    Ct.refCond    = mean(Ct.mean, na.rm = TRUE),
+    Ct.refCond.se = sqrt(sum((Ct.SE %>% replace_na(0))^2)) / sqrt(n()),
+    .groups = "drop"
+  )
+
+# ----------------------------
+# 3) Reference PROBE’s value under the reference CONDITION
+#    (a single-row tibble holding constants for all rows)
+# ----------------------------
+ref_probe_constants <- ref_condition_by_probe %>%
+  filter(Probe == ref_probe) %>%
+  transmute(
+    Ct.refCond.refProbe    = Ct.refCond,
+    Ct.refCond.refProbe.se = Ct.refCond.se
+  )
+
+# If the reference probe is missing, you may want to stop with a clear error:
+# stopifnot(nrow(ref_probe_constants) == 1)
+
+# ----------------------------
+# 4) Reference PROBE per RNA Sample
+# ----------------------------
+ref_probe_by_RNA_sample <- df_rt_total %>%
+  filter(Probe == ref_probe) %>%
+  select(RNA_sample,
+         Ct.refProbe    = Ct.mean,
+         Ct.refProbe.se = Ct.SE) %>%
+  distinct()
+
+# ----------------------------
+# 5) Build the analysis table by merging everything
+# ----------------------------
+
+df_merged_total <- df_rt_total %>%
+  left_join(ref_condition_by_probe, by = c("Probe")) %>%
+  left_join(ref_probe_by_RNA_sample, by = "RNA_sample") %>%
+  cross_join(ref_probe_constants)
+
+# ----------------------------
+# 6) Final calculations (ΔΔCt, Rel. abundance, and SE propagation)
+# ----------------------------
+df_total <- df_merged_total %>%
+  mutate(
+    # ΔCt for each row vs. the ref probe measured in the same sample
+    delta_ct = Ct.mean - Ct.refProbe,
+
+    # ΔCt for the reference condition (probe vs. ref probe under ref condition)
+    delta_ct_refCond = Ct.refCond - Ct.refCond.refProbe,
+
+    # ΔΔCt and relative abundance
+    delta_delta_ct = delta_ct - delta_ct_refCond,
+    Rel_abund      = 2^(-delta_delta_ct),
+
+    # SE propagation
+    delta_ct_se = sqrt((Ct.SE %>% replace_na(0))^2 +
+                       (Ct.refProbe.se %>% replace_na(0))^2),
+
+    delta_ct_refCond_se = sqrt((Ct.refCond.se %>% replace_na(0))^2 +
+                               (Ct.refCond.refProbe.se %>% replace_na(0))^2),
+
+    delta_delta_ct_se = sqrt(delta_ct_se^2 + delta_ct_refCond_se^2),
+    Rel_abund_se      = Rel_abund * log(2) * delta_delta_ct_se
+  )
+
+# df_out is your final tibble with everything computed.
+
+p_total <- ggplot(df_total %>% filter(Probe != "ERCC25"),
+       aes(x = Probe, y = Rel_abund, color = dKO)) +
+  geom_point() +
+  stat_summary(fun = mean, geom = "crossbar", width = 0.5) +
+  ggokabeito::scale_color_okabe_ito() +
+  scale_y_log2nice() +
+  coord_cartesian(ylim = c(0.25,4))
+p_total
+```
