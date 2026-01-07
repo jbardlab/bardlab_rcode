@@ -201,7 +201,7 @@ p_viol <- ggplot(df,
               fill = NA) +
   scale_y_log10nice() +
   facet_wrap(.~FP) +
-  labs(x = "", y = "Fluor. (A.U.)") +
+  labs(x = "Dox concentration (uM)", y = "Fluor. (A.U.)") +
   coord_cartesian(ylim = c(1e-4,5e-1))
 p_viol
 ggsave("fig_violin.pdf",p_viol,width = 40, height = 30, units = "mm")
