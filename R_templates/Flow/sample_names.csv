@@ -1,0 +1,23 @@
+fileName,sample_ID,Well,FP,Conc
+C01 Eos 0.fcs,C01 Eos 0,C01,Eos,0
+C02 Eos 0.1.fcs,C02 Eos 0.1,C02,Eos,0.1
+C03 Eos 0.25.fcs,C03 Eos 0.25,C03,Eos,0.25
+C04 Eos 0.5.fcs,C04 Eos 0.5,C04,Eos,0.5
+C05 Eos 0.75.fcs,C05 Eos 0.75,C05,Eos,0.75
+C06 Eos 1.0.fcs,C06 Eos 1.0,C06,Eos,1.0
+C07 Eos 2.5.fcs,C07 Eos 2.5,C07,Eos,2.5
+C08 Eos 5.fcs,C08 Eos 5,C08,Eos,5
+C09 Eos 7.5.fcs,C09 Eos 7.5,C09,Eos,7.5
+C10 Eos 10.fcs,C10 Eos 10,C10,Eos,10
+C11 Eos 100.fcs,C11 Eos 100,C11,Eos,100
+E01 Neo 0.fcs,E01 Neo 0,E01,Neo,0
+E02 Neo 0.1.fcs,E02 Neo 0.1,E02,Neo,0.1
+E03 Neo 0.25.fcs,E03 Neo 0.25,E03,Neo,0.25
+E04 Neo 0.5.fcs,E04 Neo 0.5,E04,Neo,0.5
+E05 Neo 0.75.fcs,E05 Neo 0.75,E05,Neo,0.75
+E06 Neo 1.0.fcs,E06 Neo 1.0,E06,Neo,1.0
+E07 Neo 2.5.fcs,E07 Neo 2.5,E07,Neo,2.5
+E08 Neo 5.fcs,E08 Neo 5,E08,Neo,5
+E09 Neo 7.5.fcs,E09 Neo 7.5,E09,Neo,7.5
+E10 Neo 10.fcs,E10 Neo 10,E10,Neo,10
+E11 Neo 100.fcs,E11 Neo 100,E11,Neo,100
