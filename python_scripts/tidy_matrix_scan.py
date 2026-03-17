@@ -44,6 +44,22 @@ import pandas as pd
 import os
 import re
 
+WELL_PATTERN = re.compile(r'^[A-H]\d{2}$')
+
+
+def _is_well_identifier(text):
+    return bool(WELL_PATTERN.match(text.strip()))
+
+
+def _coerce_float(value):
+    value = value.strip()
+    if value == "":
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
 def parse_csv(input_file, matrix_size=3):
     """
     Parse the custom CSV format and convert to tidy data.
@@ -79,57 +95,55 @@ def parse_csv(input_file, matrix_size=3):
     
     line_index = 0
     num_lines = len(lines)
-    
-    # Skip header until we find a well identifier
+
     while line_index < num_lines:
         line = lines[line_index].strip()
-        
-        # Check if this line is a well identifier (like A01, A02, etc.)
-        if re.match(r'^[A-Z]+\d+$', line):
-            well = line
+
+        if not _is_well_identifier(line):
             line_index += 1
-            
-            # Next line is the channel information
-            if line_index < num_lines:
-                channel = lines[line_index].strip()
-                line_index += 1
-                
-                # Next matrix_size lines contain matrix data
-                matrix_data = []
-                for i in range(matrix_size):
-                    if line_index < num_lines:
-                        line = lines[line_index].strip()
-                        parts = line.split(',')
-                        
-                        # Check if this looks like matrix data (try to convert to float)
-                        try:
-                            _ = [float(part.strip()) for part in parts]
-                            matrix_data.append(parts)
-                            line_index += 1
-                        except ValueError:
-                            # Not matrix data, we might have hit the next well or the end
-                            break
-                    else:
-                        break
-                
-                # Process matrix data
-                for i in range(len(matrix_data)):
-                    for j in range(len(matrix_data[i])):
-                        try:
-                            value = float(matrix_data[i][j])
-                            matrix_position = f"{i+1}-{j+1}"
-                            data.append({
-                                'Filename': filename,
-                                'Well': well,
-                                'Channel': channel,
-                                'Matrix_ij': matrix_position,
-                                'Value': value
-                            })
-                        except (ValueError, IndexError):
-                            # Skip if value can't be converted to float or index out of range
-                            pass
-        else:
-            # Not a well identifier, move to next line
+            continue
+
+        well = line
+        line_index += 1
+
+        while line_index < num_lines and lines[line_index].strip() == "":
+            line_index += 1
+
+        if line_index >= num_lines:
+            break
+
+        channel = lines[line_index].strip()
+        line_index += 1
+
+        row_idx = 0
+        while line_index < num_lines:
+            row_line = lines[line_index].strip()
+
+            if row_line == "" or _is_well_identifier(row_line):
+                break
+
+            cells = row_line.split(',')
+            numeric_found = False
+
+            for col_idx, cell in enumerate(cells):
+                value = _coerce_float(cell)
+                if value is None:
+                    continue
+
+                numeric_found = True
+                matrix_position = f"{row_idx + 1}-{col_idx + 1}"
+                data.append({
+                    'Filename': filename,
+                    'Well': well,
+                    'Channel': channel,
+                    'Matrix_ij': matrix_position,
+                    'Value': value
+                })
+
+            if not numeric_found:
+                break
+
+            row_idx += 1
             line_index += 1
     
     # Convert to pandas DataFrame
@@ -162,8 +176,11 @@ def main():
         # Parse the input CSV and convert to tidy format
         df = parse_csv(args.input_csv, args.matrix_size)
     
-        # Sort the DataFrame by Filename, Well, Channel, then matrix_ij
-        df = df.sort_values(by=['Filename', 'Well', 'Channel', 'Matrix_ij'])
+        if df.empty:
+            df = pd.DataFrame(columns=['Filename', 'Well', 'Channel', 'Matrix_ij', 'Value'])
+        else:
+            # Sort the DataFrame by Filename, Well, Channel, then matrix_ij
+            df = df.sort_values(by=['Filename', 'Well', 'Channel', 'Matrix_ij'])
         
         # Save to output CSV
         df.to_csv(args.output_csv, index=False)
