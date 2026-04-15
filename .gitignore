@@ -234,3 +234,5 @@ site/
 .cache
 pytest-temp
 .claude
+
+bigdata/
